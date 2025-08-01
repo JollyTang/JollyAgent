@@ -71,6 +71,15 @@ logs/
 *.sqlite3
 chroma_db/
 
+# FAISS and Memory Database
+memory_db/
+demo_memory_db/
+simple_demo_db/
+*.index
+faiss.index
+metadata.json
+summaries.json
+
 # Demo files
 demo/*.txt
 demo/*.log

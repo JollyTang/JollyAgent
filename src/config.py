@@ -39,17 +39,22 @@ class LLMConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Memory configuration."""
 
-    # Chroma向量数据库配置
+    # FAISS向量数据库配置
     persist_directory: str = Field(
-        default="./chroma_db",
+        default="./memory_db",
         description="Directory to persist vector database",
     )
-    collection_name: str = Field(
-        default="jollyagent_memory",
-        description="Collection name for memory storage",
+    index_type: str = Field(
+        default="IVF100,Flat",
+        description="FAISS index type (IVF100,Flat, HNSW, etc.)",
+    )
+    embedding_dimension: int = Field(
+        default=1024,  # BAAI/bge-large-zh-v1.5的维度是1024
+        ge=1,
+        description="Embedding dimension",
     )
     embedding_model: str = Field(
-        default="text-embedding-3-small",
+        default="BAAI/bge-large-zh-v1.5",  # 使用硅基流动的免费模型
         description="Embedding model name",
     )
     max_memory_items: int = Field(
@@ -62,6 +67,33 @@ class MemoryConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description="Similarity threshold for memory retrieval",
+    )
+    
+    # 分层记忆管理配置
+    enable_layered_memory: bool = Field(
+        default=True,
+        description="Enable layered memory management",
+    )
+    conversation_length_threshold: int = Field(
+        default=10,
+        ge=1,
+        description="Threshold for switching between short and long conversation modes",
+    )
+    short_term_rounds: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Number of recent rounds to keep in short-term memory",
+    )
+    summary_model: str = Field(
+        default="Qwen/QwQ-32B",
+        description="Model for generating conversation summaries",
+    )
+    summary_max_tokens: int = Field(
+        default=100,
+        ge=10,
+        le=500,
+        description="Maximum tokens for conversation summary generation",
     )
 
 

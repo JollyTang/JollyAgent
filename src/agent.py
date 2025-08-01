@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 import os
+from uuid import uuid4
 
 import openai
 from pydantic import BaseModel, Field
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field
 from src.config import get_config
 from src.executor import get_executor
 from src.tools import AVAILABLE_TOOLS
+from src.memory import LayeredMemoryCoordinator
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -21,6 +23,7 @@ logger = logging.getLogger(__name__)
 class Message(BaseModel):
     """消息数据模型."""
     
+    id: str = Field(default_factory=lambda: str(uuid4()))
     role: str = Field(..., description="消息角色：user, assistant, tool")
     content: str = Field(..., description="消息内容")
     timestamp: datetime = Field(default_factory=datetime.now, description="消息时间戳")
@@ -85,13 +88,38 @@ class Agent:
             api_key=self.config.llm.api_key,
         )
         
-        # 注册所有工具
+        # 初始化分层记忆管理器
+        memory_config = {
+            "persist_directory": self.config.memory.persist_directory,
+            "embedding_dimension": self.config.memory.embedding_dimension,
+            "index_type": self.config.memory.index_type,
+            "embedding_model": self.config.memory.embedding_model,
+            "max_memory_items": self.config.memory.max_memory_items,
+            "similarity_threshold": self.config.memory.similarity_threshold,
+            "openai_api_key": self.config.llm.api_key,
+            # 分层记忆配置
+            "conversation_length_threshold": self.config.memory.conversation_length_threshold,
+            "short_term_rounds": self.config.memory.short_term_rounds,
+            "summary_model": self.config.memory.summary_model,
+            "summary_max_tokens": self.config.memory.summary_max_tokens
+        }
+        
+        if self.config.memory.enable_layered_memory:
+            self.memory_manager = LayeredMemoryCoordinator(memory_config)
+            logger.info("Using layered memory management system")
+        else:
+            # 回退到原有的FAISS记忆管理器
+            from src.memory import FAISSMemoryManager
+            self.memory_manager = FAISSMemoryManager(memory_config)
+            logger.info("Using legacy FAISS memory management system")
+        
+        # 注册工具
         self._register_tools()
         
         # 设置日志
         self._setup_logging()
         
-        logger.info("JollyAgent initialized successfully")
+        logger.info("Agent initialized successfully")
     
     def _register_tools(self):
         """注册所有可用的工具."""
@@ -123,10 +151,56 @@ class Agent:
             ]
         )
     
-    def start_conversation(self, conversation_id: str) -> AgentState:
+    async def _save_conversation_memory(self):
+        """保存对话记忆到记忆管理器."""
+        try:
+            # 确保记忆管理器已初始化
+            if not self.memory_manager._is_initialized:
+                await self.memory_manager.initialize()
+            
+            # 保存最近的对话消息
+            recent_messages = self.state.messages[-4:]  # 保存最近4条消息
+            
+            for message in recent_messages:
+                # 跳过系统消息
+                if message.role == "system":
+                    continue
+                
+                # 添加元数据
+                metadata = {
+                    "conversation_id": self.state.conversation_id,
+                    "timestamp": message.timestamp.isoformat(),
+                    "message_id": message.id if hasattr(message, 'id') else None
+                }
+                
+                # 保存到记忆管理器（分层记忆管理器会自动决定存储层级）
+                await self.memory_manager.add_memory(
+                    content=message.content,
+                    role=message.role,
+                    metadata=metadata
+                )
+            
+            logger.info(f"Saved {len(recent_messages)} messages to layered memory system")
+            
+        except Exception as e:
+            logger.error(f"Failed to save conversation memory: {e}")
+    
+    async def start_conversation(self, conversation_id: str) -> AgentState:
         """开始新的对话."""
         self.state = AgentState(conversation_id=conversation_id)
-        logger.info(f"Started new conversation: {conversation_id}")
+        
+        # 初始化记忆管理器
+        try:
+            await self.memory_manager.initialize()
+            
+            # 如果是分层记忆管理器，启动新会话
+            if hasattr(self.memory_manager, 'start_conversation'):
+                await self.memory_manager.start_conversation(conversation_id)
+            
+            logger.info("Memory manager initialized and conversation started")
+        except Exception as e:
+            logger.warning(f"Failed to initialize memory manager: {e}")
+        
         return self.state
     
     def add_message(self, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Message:
@@ -198,12 +272,79 @@ class Agent:
 - 如果工具执行失败，分析错误原因并尝试其他方法
 """
     
-    def _build_messages_for_llm(self) -> List[Dict[str, str]]:
+    async def _build_messages_for_llm(self) -> List[Dict[str, str]]:
         """构建发送给 LLM 的消息列表."""
         messages = [{"role": "system", "content": self._build_system_prompt()}]
         
-        # 添加对话历史
-        for msg in self.state.messages[-10:]:  # 只保留最近10条消息
+        # 使用分层记忆管理器获取记忆上下文
+        if self.state.messages:
+            # 获取当前用户消息作为查询
+            current_user_message = None
+            for msg in reversed(self.state.messages):
+                if msg.role == "user":
+                    current_user_message = msg.content
+                    break
+            
+            if current_user_message and hasattr(self.memory_manager, 'get_memory_context'):
+                try:
+                    # 获取分层记忆上下文
+                    memory_context = await self.memory_manager.get_memory_context(
+                        self.state.conversation_id, 
+                        current_user_message
+                    )
+                    
+                    # 构建记忆上下文文本
+                    context_parts = []
+                    
+                    # 添加会话摘要
+                    if memory_context.conversation_summary:
+                        context_parts.append(f"会话摘要：{memory_context.conversation_summary}")
+                    
+                    # 添加相关长期记忆
+                    if memory_context.relevant_memories:
+                        context_parts.append("相关历史记忆：")
+                        for i, memory in enumerate(memory_context.relevant_memories, 1):
+                            context_parts.append(f"{i}. [{memory.role}] {memory.content}")
+                    
+                    # 添加短期记忆（最近N轮）
+                    if memory_context.short_term_messages:
+                        context_parts.append("最近对话：")
+                        for msg in memory_context.short_term_messages:
+                            context_parts.append(f"[{msg.role}] {msg.content}")
+                    
+                    if context_parts:
+                        memory_context_text = "\n".join(context_parts)
+                        messages.append({
+                            "role": "system", 
+                            "content": memory_context_text
+                        })
+                        logger.info(f"Added layered memory context: mode={memory_context.memory_mode}")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to retrieve layered memory context: {e}")
+                    # 回退到原有的简单记忆检索
+                    try:
+                        relevant_memories = await self.memory_manager.search_relevant_memories(
+                            current_user_message, 
+                            limit=3
+                        )
+                        
+                        if relevant_memories:
+                            memory_context = "相关历史记忆：\n"
+                            for i, memory in enumerate(relevant_memories, 1):
+                                memory_context += f"{i}. [{memory.role}] {memory.content}\n"
+                            
+                            messages.append({
+                                "role": "system", 
+                                "content": memory_context
+                            })
+                            logger.info(f"Added fallback memory context: {len(relevant_memories)} memories")
+                    except Exception as e2:
+                        logger.warning(f"Fallback memory retrieval also failed: {e2}")
+        
+        # 添加当前对话历史（只保留最近几条，避免重复）
+        recent_messages = self.state.messages[-3:]  # 只保留最近3条消息
+        for msg in recent_messages:
             messages.append({
                 "role": msg.role,
                 "content": msg.content
@@ -366,6 +507,9 @@ class Agent:
             self.state.is_completed = True
             self.add_message("assistant", final_answer)
         
+        # 保存对话记忆
+        await self._save_conversation_memory()
+        
         return self.state.messages[-1].content
     
     async def _think(self, step: ReActStep):
@@ -373,7 +517,8 @@ class Agent:
         logger.debug("Starting think phase")
         
         # 构建提示词
-        messages = self._build_messages_for_llm()
+        messages = await self._build_messages_for_llm()
+        
         messages.append({
             "role": "user",
             "content": """请分析当前问题并制定解决方案。
@@ -440,7 +585,7 @@ class Agent:
         logger.debug("Starting observe phase")
         
         # 构建包含观察结果的提示词
-        messages = self._build_messages_for_llm()
+        messages = await self._build_messages_for_llm()
         
         # 添加观察结果
         observations_text = "\n".join([
@@ -483,6 +628,39 @@ class Agent:
         if step.final_answer:
             logger.debug(f"Final answer: {step.final_answer[:100]}...")
     
+    async def end_conversation(self) -> Optional[str]:
+        """结束当前会话并生成摘要."""
+        if not self.state:
+            logger.warning("No active conversation to end")
+            return None
+        
+        try:
+            # 如果是分层记忆管理器，结束会话并生成摘要
+            if hasattr(self.memory_manager, 'end_conversation'):
+                # 准备消息列表用于生成摘要
+                messages_for_summary = []
+                for msg in self.state.messages:
+                    if msg.role in ["user", "assistant"]:
+                        messages_for_summary.append({
+                            "role": msg.role,
+                            "content": msg.content
+                        })
+                
+                summary = await self.memory_manager.end_conversation(
+                    self.state.conversation_id,
+                    messages_for_summary
+                )
+                
+                logger.info(f"Conversation ended with summary: {summary[:50]}...")
+                return summary
+            else:
+                logger.info("Conversation ended (no summary generation)")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to end conversation: {e}")
+            return None
+    
     def get_conversation_summary(self) -> Dict[str, Any]:
         """获取对话摘要."""
         if not self.state:
@@ -501,15 +679,28 @@ class Agent:
 _agent_instance: Optional[Agent] = None
 
 
-def get_agent() -> Agent:
+async def get_agent() -> Agent:
     """获取全局 Agent 实例."""
     global _agent_instance
     if _agent_instance is None:
         _agent_instance = Agent()
+        # 初始化记忆管理器
+        try:
+            await _agent_instance.memory_manager.initialize()
+            logger.info("Global agent memory manager initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize global agent memory manager: {e}")
     return _agent_instance
 
 
 def reset_agent():
     """重置全局 Agent 实例."""
     global _agent_instance
+    if _agent_instance:
+        # 关闭记忆管理器
+        try:
+            asyncio.create_task(_agent_instance.memory_manager.close())
+        except Exception as e:
+            logger.warning(f"Failed to close memory manager: {e}")
     _agent_instance = None
+    logger.info("Agent instance reset")
