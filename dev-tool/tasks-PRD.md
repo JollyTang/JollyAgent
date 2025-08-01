@@ -23,6 +23,8 @@
 - `src/config.py` - 配置管理
 - `tests/` - 测试目录
 - `requirements.txt` - 项目依赖
+- `pyproject.toml` - 项目配置文件
+- `.gitignore` - Git忽略文件配置
 - `README.md` - 项目文档
 
 ### 注意事项
@@ -37,7 +39,7 @@
 ## 任务清单
 
 - [ ] 1.0 项目基础架构搭建
-  - [ ] 1.1 创建项目目录结构和基础文件
+  - [x] 1.1 创建项目目录结构和基础文件
   - [ ] 1.2 设置Python虚拟环境和依赖管理
   - [ ] 1.3 配置开发工具（pytest, black, flake8）
   - [ ] 1.4 创建基础配置文件（config.py）
