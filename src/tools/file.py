@@ -109,13 +109,6 @@ class ReadFileTool(Tool):
                 error=None
             )
             
-        except UnicodeDecodeError as e:
-            logger.error(f"File encoding error: {e}")
-            return ToolResult(
-                success=False,
-                result=None,
-                error=f"File encoding error: {e}"
-            )
         except Exception as e:
             logger.error(f"File read failed: {e}")
             return ToolResult(
@@ -194,6 +187,15 @@ class WriteFileTool(Tool):
             if file_dir and not os.path.exists(file_dir):
                 os.makedirs(file_dir, exist_ok=True)
             
+            # 备份原文件内容（用于撤销）
+            original_content = None
+            if mode == "w" and os.path.exists(file_path):
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        original_content = f.read()
+                except Exception as e:
+                    logger.warning(f"Failed to backup original content: {e}")
+            
             logger.info(f"Writing file: {file_path} (mode: {mode})")
             
             # 异步写入文件
@@ -214,6 +216,28 @@ class WriteFileTool(Tool):
                 "content_length": len(content)
             }
             
+            # 添加到撤销管理器
+            if mode == "w" and original_content is not None:
+                try:
+                    from src.cli import get_undo_manager
+                    undo_manager = get_undo_manager()
+                    
+                    undo_manager.add_action(
+                        action_type="file_write",
+                        description=f"写入文件: {file_path}",
+                        data={
+                            "file_path": file_path,
+                            "original_content": original_content,
+                            "encoding": encoding
+                        },
+                        can_undo=True,
+                        undo_function="undo_file_write"
+                    )
+                    
+                    logger.info(f"Added file write action to undo manager: {file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to add undo action: {e}")
+            
             logger.info(f"File written successfully: {file_path} ({file_size} bytes)")
             
             return ToolResult(
@@ -224,6 +248,114 @@ class WriteFileTool(Tool):
             
         except Exception as e:
             logger.error(f"File write failed: {e}")
+            return ToolResult(
+                success=False,
+                result=None,
+                error=str(e)
+            )
+
+
+class DeleteFileTool(Tool):
+    """删除文件的工具."""
+    
+    def _get_schema(self) -> ToolSchema:
+        """获取工具模式定义."""
+        return ToolSchema(
+            name="delete_file",
+            description="删除文件",
+            parameters=[
+                ToolParameter(
+                    name="file_path",
+                    type="string",
+                    description="文件路径",
+                    required=True
+                )
+            ],
+            returns="删除结果",
+            category="file",
+            dangerous=True
+        )
+    
+    async def execute(self, **kwargs) -> ToolResult:
+        """删除文件."""
+        file_path = kwargs.get("file_path")
+        
+        if not file_path:
+            return ToolResult(
+                success=False,
+                result=None,
+                error="File path is required"
+            )
+        
+        try:
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                return ToolResult(
+                    success=False,
+                    result=None,
+                    error=f"File not found: {file_path}"
+                )
+            
+            # 检查是否为文件
+            if not os.path.isfile(file_path):
+                return ToolResult(
+                    success=False,
+                    result=None,
+                    error=f"Path is not a file: {file_path}"
+                )
+            
+            # 备份文件内容（用于撤销）
+            original_content = None
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    original_content = f.read()
+            except Exception as e:
+                logger.warning(f"Failed to backup file content: {e}")
+            
+            logger.info(f"Deleting file: {file_path}")
+            
+            # 异步删除文件
+            def delete_file_sync():
+                os.remove(file_path)
+            
+            await asyncio.to_thread(delete_file_sync)
+            
+            # 添加到撤销管理器
+            if original_content is not None:
+                try:
+                    from src.cli import get_undo_manager
+                    undo_manager = get_undo_manager()
+                    
+                    undo_manager.add_action(
+                        action_type="file_delete",
+                        description=f"删除文件: {file_path}",
+                        data={
+                            "file_path": file_path,
+                            "original_content": original_content
+                        },
+                        can_undo=True,
+                        undo_function="undo_file_delete"
+                    )
+                    
+                    logger.info(f"Added file delete action to undo manager: {file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to add undo action: {e}")
+            
+            result = {
+                "file_path": file_path,
+                "deleted": True
+            }
+            
+            logger.info(f"File deleted successfully: {file_path}")
+            
+            return ToolResult(
+                success=True,
+                result=result,
+                error=None
+            )
+            
+        except Exception as e:
+            logger.error(f"File delete failed: {e}")
             return ToolResult(
                 success=False,
                 result=None,

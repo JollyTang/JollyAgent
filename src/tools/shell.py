@@ -108,6 +108,30 @@ class RunShellTool(Tool):
             if stderr_text and not success:
                 error = f"{error}: {stderr_text}"
             
+            # 添加到撤销管理器（对于某些危险命令）
+            if self._is_dangerous_command(command):
+                try:
+                    from src.cli import get_undo_manager
+                    undo_manager = get_undo_manager()
+                    
+                    undo_manager.add_action(
+                        action_type="shell_command",
+                        description=f"执行Shell命令: {command}",
+                        data={
+                            "command": command,
+                            "cwd": cwd,
+                            "exit_code": exit_code,
+                            "stdout": stdout_text,
+                            "stderr": stderr_text
+                        },
+                        can_undo=False,  # Shell命令通常无法自动撤销
+                        undo_function="undo_shell_command"
+                    )
+                    
+                    logger.info(f"Added shell command action to undo manager: {command}")
+                except Exception as e:
+                    logger.warning(f"Failed to add undo action: {e}")
+            
             logger.info(f"Shell command completed with exit code: {exit_code}")
             
             return ToolResult(
@@ -128,3 +152,14 @@ class RunShellTool(Tool):
                 },
                 error=str(e)
             )
+    
+    def _is_dangerous_command(self, command: str) -> bool:
+        """判断是否为危险命令."""
+        dangerous_keywords = [
+            'rm', 'del', 'delete', 'format', 'dd', 'mkfs',
+            'chmod', 'chown', 'sudo', 'su', 'kill', 'pkill',
+            'shutdown', 'reboot', 'halt', 'poweroff'
+        ]
+        
+        command_lower = command.lower()
+        return any(keyword in command_lower for keyword in dangerous_keywords)

@@ -77,10 +77,23 @@ class AgentState(BaseModel):
 class Agent:
     """JollyAgent 主类，实现 ReAct 循环."""
     
-    def __init__(self, config=None):
-        """初始化 Agent."""
+    def __init__(self, config=None, enable_confirmation: bool = True, auto_confirm: bool = False):
+        """初始化 Agent.
+        
+        Args:
+            config: 配置对象
+            enable_confirmation: 是否启用用户确认机制
+            auto_confirm: 是否自动确认所有操作
+        """
         self.config = config or get_config()
         self.state: Optional[AgentState] = None
+        
+        # 初始化用户确认管理器
+        if enable_confirmation:
+            from src.cli import UserConfirmation
+            self.confirmation_manager = UserConfirmation(auto_confirm=auto_confirm)
+        else:
+            self.confirmation_manager = None
         
         # 初始化 OpenAI 客户端
         self.client = openai.OpenAI(
@@ -185,8 +198,12 @@ class Agent:
         except Exception as e:
             logger.error(f"Failed to save conversation memory: {e}")
     
-    async def start_conversation(self, conversation_id: str) -> AgentState:
+    async def start_conversation(self, conversation_id: Optional[str] = None) -> AgentState:
         """开始新的对话."""
+        # 如果没有提供conversation_id，自动生成一个
+        if conversation_id is None:
+            conversation_id = f"conv_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid4())[:8]}"
+        
         self.state = AgentState(conversation_id=conversation_id)
         
         # 初始化记忆管理器
@@ -560,6 +577,20 @@ class Agent:
         
         executor = get_executor()
         
+        # 如果有用户确认管理器，先确认工具调用
+        if self.confirmation_manager and step.tool_calls:
+            step_info = f"步骤 {len(self.state.react_steps) + 1}"
+            if step.thought:
+                step_info += f" - {step.thought.content[:50]}..."
+            
+            confirmed_calls = await self.confirmation_manager.confirm_tool_calls(
+                step.tool_calls, 
+                step_info
+            )
+            
+            # 更新步骤中的工具调用为确认后的列表
+            step.tool_calls = confirmed_calls
+        
         for tool_call in step.tool_calls:
             logger.info(f"Executing tool: {tool_call.name}")
             
@@ -577,6 +608,14 @@ class Agent:
                 error=result.error
             )
             step.observations.append(observation)
+            
+            # 记录到确认历史
+            if self.confirmation_manager:
+                self.confirmation_manager.add_to_history(
+                    tool_call, 
+                    True, 
+                    "执行成功" if result.success else f"执行失败: {result.error}"
+                )
             
             logger.debug(f"Tool {tool_call.name} result: {result.success}")
     
@@ -704,3 +743,21 @@ def reset_agent():
             logger.warning(f"Failed to close memory manager: {e}")
     _agent_instance = None
     logger.info("Agent instance reset")
+
+
+def main():
+    """CLI入口点."""
+    import sys
+    import os
+    
+    # 添加src目录到Python路径
+    src_dir = os.path.dirname(os.path.abspath(__file__))
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    
+    from cli.cli import main as cli_main
+    cli_main()
+
+
+if __name__ == "__main__":
+    main()
