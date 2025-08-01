@@ -57,6 +57,7 @@ def print_help():
     """打印帮助信息."""
     help_text = """
 [bold]可用命令:[/bold]
+• [green]start[/green] - 启动交互式模式（推荐）
 • [green]chat[/green] - 开始与Agent对话
 • [green]config[/green] - 查看当前配置
 • [green]reset[/green] - 重置Agent状态
@@ -64,7 +65,10 @@ def print_help():
 • [green]history[/green] - 查看撤销历史
 • [green]help[/green] - 显示此帮助信息
 
-[bold]示例:[/bold]
+[bold]推荐使用:[/bold]
+• [yellow]jollyagent start[/yellow] - 启动交互式模式，通过菜单选择操作
+
+[bold]其他示例:[/bold]
 • jollyagent chat
 • jollyagent chat --stream
 • jollyagent chat --no-confirm
@@ -237,6 +241,60 @@ def help():
     print_help()
 
 
+@app.command()
+def start():
+    """启动JollyAgent交互式模式，提供菜单选择各种功能."""
+    print_banner()
+    console.print("\n[green]欢迎使用JollyAgent交互式模式！[/green]\n")
+    
+    # 运行交互式会话
+    asyncio.run(run_interactive_session())
+
+
+async def run_interactive_session():
+    """运行交互式会话."""
+    try:
+        while True:
+            # 显示主菜单
+            show_main_menu()
+            
+            # 获取用户选择
+            choice = Prompt.ask(
+                "请选择操作",
+                choices=["1", "2", "3", "4", "5", "6", "7", "q"],
+                default="1"
+            )
+            
+            if choice == "q":
+                console.print("\n[yellow]退出交互式模式...[/yellow]")
+                break
+            elif choice == "1":
+                await start_chat_session()
+            elif choice == "2":
+                show_config()
+            elif choice == "3":
+                reset_agent_state()
+            elif choice == "4":
+                show_undo_history()
+            elif choice == "5":
+                await perform_undo()
+            elif choice == "6":
+                show_help()
+            elif choice == "7":
+                clear_undo_history()
+            
+            # 操作完成后暂停
+            if choice != "q":
+                console.print("\n[dim]按回车键继续...[/dim]")
+                input()
+                console.print("\n" + "="*60 + "\n")
+                
+    except KeyboardInterrupt:
+        console.print("\n[yellow]交互式模式被中断[/yellow]")
+    except Exception as e:
+        console.print(f"[red]交互式模式出错: {e}[/red]")
+
+
 async def run_chat_session(
     stream: bool, 
     conversation_id: Optional[str], 
@@ -251,7 +309,7 @@ async def run_chat_session(
     # 初始化日志记录器
     cli_logger = get_cli_logger()
     if log_file:
-        from src.cli import setup_cli_logging
+        from src import setup_cli_logging
         cli_logger = setup_cli_logging(log_file=log_file)
     
     # 初始化消息计数
@@ -275,7 +333,7 @@ async def run_chat_session(
         
         # 如果Agent没有确认管理器，重新创建
         if enable_confirmation and not hasattr(agent, 'confirmation_manager'):
-            from src.cli import UserConfirmation
+            from src import UserConfirmation
             agent.confirmation_manager = UserConfirmation(auto_confirm=auto_confirm)
         
         # 开始对话
@@ -453,6 +511,176 @@ async def process_message_simple(
         except Exception as e:
             console.print(f"[red]处理失败: {e}[/red]")
             raise e
+
+
+def show_main_menu():
+    """显示主菜单."""
+    menu_text = """
+[bold blue]🤖 JollyAgent 主菜单[/bold blue]
+
+[bold]可用操作:[/bold]
+[green]1.[/green] 开始对话 (Chat)
+[green]2.[/green] 查看配置 (Config)
+[green]3.[/green] 重置Agent状态 (Reset)
+[green]4.[/green] 查看撤销历史 (History)
+[green]5.[/green] 撤销操作 (Undo)
+[green]6.[/green] 显示帮助 (Help)
+[green]7.[/green] 清空撤销历史 (Clear History)
+[green]q.[/green] 退出 (Quit)
+
+[dim]提示: 输入数字或字母选择操作[/dim]
+    """
+    console.print(Panel(menu_text, title="主菜单", border_style="blue"))
+
+
+async def start_chat_session():
+    """启动聊天会话."""
+    console.print("\n[bold blue]开始对话会话[/bold blue]")
+    
+    # 获取对话参数
+    stream = Confirm.ask("启用流式输出？", default=True)
+    auto_confirm = Confirm.ask("启用自动确认？", default=False)
+    verbose = Confirm.ask("启用详细输出？", default=False)
+    
+    conversation_id = Prompt.ask("对话ID (可选，直接回车自动生成)")
+    if not conversation_id.strip():
+        conversation_id = None
+    
+    log_file = Prompt.ask("日志文件路径 (可选，直接回车使用默认)")
+    if not log_file.strip():
+        log_file = None
+    
+    console.print(f"\n[green]启动对话...[/green]")
+    console.print(f"流式输出: {stream}")
+    console.print(f"自动确认: {auto_confirm}")
+    console.print(f"详细输出: {verbose}")
+    console.print(f"对话ID: {conversation_id or '自动生成'}")
+    console.print(f"日志文件: {log_file or '默认'}")
+    
+    # 运行对话会话
+    await run_chat_session(
+        stream=stream,
+        conversation_id=conversation_id,
+        max_steps=10,
+        verbose=verbose,
+        enable_confirmation=not auto_confirm,
+        auto_confirm=auto_confirm,
+        show_thoughts=True,
+        log_file=log_file
+    )
+
+
+def show_config():
+    """显示配置信息."""
+    console.print("\n[bold blue]当前配置信息[/bold blue]")
+    config()
+
+
+def reset_agent_state():
+    """重置Agent状态."""
+    console.print("\n[bold blue]重置Agent状态[/bold blue]")
+    try:
+        reset_agent()
+        console.print("[green]Agent状态已重置[/green]")
+    except Exception as e:
+        console.print(f"[red]重置失败: {e}[/red]")
+
+
+def show_undo_history():
+    """显示撤销历史."""
+    console.print("\n[bold blue]撤销历史记录[/bold blue]")
+    try:
+        undo_manager = get_undo_manager()
+        limit = Prompt.ask("显示数量限制", default="10")
+        try:
+            limit = int(limit)
+        except ValueError:
+            limit = 10
+        undo_manager.show_history(limit)
+    except Exception as e:
+        console.print(f"[red]查看历史记录失败: {e}[/red]")
+
+
+async def perform_undo():
+    """执行撤销操作."""
+    console.print("\n[bold blue]撤销操作[/bold blue]")
+    try:
+        undo_manager = get_undo_manager()
+        
+        if not undo_manager.history:
+            console.print("[yellow]暂无历史记录[/yellow]")
+            return
+        
+        # 显示历史记录
+        undo_manager.show_history(5)
+        
+        choice = Prompt.ask(
+            "选择操作",
+            choices=["1", "2", "3", "q"],
+            default="1"
+        )
+        
+        if choice == "1":
+            # 撤销最后一个动作
+            success = await undo_manager.undo_last_action()
+            if success:
+                console.print("[green]撤销成功[/green]")
+            else:
+                console.print("[red]撤销失败[/red]")
+        elif choice == "2":
+            # 撤销指定ID的动作
+            action_id = Prompt.ask("请输入动作ID")
+            success = await undo_manager.undo_action_by_id(action_id)
+            if success:
+                console.print("[green]撤销成功[/green]")
+            else:
+                console.print("[red]撤销失败[/red]")
+        elif choice == "3":
+            # 选择撤销
+            undo_manager.show_history()
+            if undo_manager.history:
+                choice = Prompt.ask(
+                    "选择要撤销的动作 (输入序号或 'q' 退出)",
+                    default="q"
+                )
+                
+                if choice.lower() != 'q':
+                    try:
+                        index = int(choice) - 1
+                        if 0 <= index < len(undo_manager.history):
+                            action = undo_manager.history[-(index + 1)]
+                            success = await undo_manager.undo_action_by_id(action.id)
+                            if success:
+                                console.print("[green]撤销成功[/green]")
+                            else:
+                                console.print("[red]撤销失败[/red]")
+                        else:
+                            console.print("[red]无效的序号[/red]")
+                    except ValueError:
+                        console.print("[red]请输入有效的数字[/red]")
+        
+    except Exception as e:
+        console.print(f"[red]撤销操作失败: {e}[/red]")
+
+
+def show_help():
+    """显示帮助信息."""
+    console.print("\n[bold blue]帮助信息[/bold blue]")
+    print_help()
+
+
+def clear_undo_history():
+    """清空撤销历史."""
+    console.print("\n[bold blue]清空撤销历史[/bold blue]")
+    try:
+        undo_manager = get_undo_manager()
+        if Confirm.ask("确定要清空所有历史记录吗？"):
+            undo_manager.clear_history()
+            console.print("[green]历史记录已清空[/green]")
+        else:
+            console.print("[yellow]操作已取消[/yellow]")
+    except Exception as e:
+        console.print(f"[red]清空历史记录失败: {e}[/red]")
 
 
 def main():

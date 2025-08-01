@@ -34,7 +34,15 @@ dev = [
 ]
 
 [project.scripts]
-jollyagent = "src.agent:main"
+jollyagent = "jollyagent:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["jollyagent*", "src*"]
+
+[tool.setuptools.package-data]
+jollyagent = ["*.py"]
+src = ["**/*.py"]
 
 [tool.black]
 line-length = 88

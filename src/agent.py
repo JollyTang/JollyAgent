@@ -171,10 +171,8 @@ class Agent:
             if not self.memory_manager._is_initialized:
                 await self.memory_manager.initialize()
             
-            # 保存最近的对话消息
-            recent_messages = self.state.messages[-4:]  # 保存最近4条消息
-            
-            for message in recent_messages:
+            # 保存所有对话消息（不仅仅是最近4条）
+            for message in self.state.messages:
                 # 跳过系统消息
                 if message.role == "system":
                     continue
@@ -193,7 +191,7 @@ class Agent:
                     metadata=metadata
                 )
             
-            logger.info(f"Saved {len(recent_messages)} messages to layered memory system")
+            logger.info(f"Saved {len(self.state.messages)} messages to layered memory system")
             
         except Exception as e:
             logger.error(f"Failed to save conversation memory: {e}")
@@ -750,13 +748,28 @@ def main():
     import sys
     import os
     
-    # 添加src目录到Python路径
-    src_dir = os.path.dirname(os.path.abspath(__file__))
-    if src_dir not in sys.path:
-        sys.path.insert(0, src_dir)
+    # 获取当前文件所在目录（src目录）
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     
-    from cli.cli import main as cli_main
-    cli_main()
+    # 添加src目录到Python路径
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
+    
+    # 添加项目根目录到Python路径（用于导入其他模块）
+    project_root = os.path.dirname(current_dir)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    
+    try:
+        from cli.cli import main as cli_main
+        cli_main()
+    except ImportError as e:
+        print(f"导入错误: {e}")
+        print(f"当前Python路径: {sys.path}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"程序执行出错: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
