@@ -70,3 +70,8 @@ logs/
 *.sqlite
 *.sqlite3
 chroma_db/
+
+# Demo files
+demo/*.txt
+demo/*.log
+demo/temp_*

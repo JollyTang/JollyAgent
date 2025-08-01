@@ -19,6 +19,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
     "click>=8.0.0",
+    "websockets>=11.0.0",
 ]
 
 [project.optional-dependencies]
@@ -114,5 +115,6 @@ dev = [
     "flake8>=7.3.0",
     "mypy>=1.17.1",
     "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
     "pytest-cov>=6.2.1",
 ]

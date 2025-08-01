@@ -1,0 +1,515 @@
+"""JollyAgent - ReAct AI Agent implementation."""
+
+import asyncio
+import json
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
+import os
+
+import openai
+from pydantic import BaseModel, Field
+
+from src.config import get_config
+from src.executor import get_executor
+from src.tools import AVAILABLE_TOOLS
+
+# 配置日志
+logger = logging.getLogger(__name__)
+
+
+class Message(BaseModel):
+    """消息数据模型."""
+    
+    role: str = Field(..., description="消息角色：user, assistant, tool")
+    content: str = Field(..., description="消息内容")
+    timestamp: datetime = Field(default_factory=datetime.now, description="消息时间戳")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="元数据")
+
+
+class ToolCall(BaseModel):
+    """工具调用数据模型."""
+    
+    name: str = Field(..., description="工具名称")
+    arguments: Dict[str, Any] = Field(..., description="工具参数")
+    id: Optional[str] = Field(default=None, description="工具调用ID")
+
+
+class Thought(BaseModel):
+    """思考过程数据模型."""
+    
+    content: str = Field(..., description="思考内容")
+    reasoning: Optional[str] = Field(default=None, description="推理过程")
+    plan: Optional[List[str]] = Field(default=None, description="执行计划")
+
+
+class Observation(BaseModel):
+    """观察结果数据模型."""
+    
+    tool_name: str = Field(..., description="工具名称")
+    result: str = Field(..., description="执行结果")
+    success: bool = Field(..., description="是否成功")
+    error: Optional[str] = Field(default=None, description="错误信息")
+
+
+class ReActStep(BaseModel):
+    """ReAct步骤数据模型."""
+    
+    thought: Optional[Thought] = Field(default=None, description="思考过程")
+    tool_calls: List[ToolCall] = Field(default_factory=list, description="工具调用")
+    observations: List[Observation] = Field(default_factory=list, description="观察结果")
+    final_answer: Optional[str] = Field(default=None, description="最终答案")
+
+
+class AgentState(BaseModel):
+    """Agent状态数据模型."""
+    
+    conversation_id: str = Field(..., description="对话ID")
+    messages: List[Message] = Field(default_factory=list, description="消息历史")
+    react_steps: List[ReActStep] = Field(default_factory=list, description="ReAct步骤")
+    current_step: Optional[ReActStep] = Field(default=None, description="当前步骤")
+    is_completed: bool = Field(default=False, description="是否完成")
+
+
+class Agent:
+    """JollyAgent 主类，实现 ReAct 循环."""
+    
+    def __init__(self, config=None):
+        """初始化 Agent."""
+        self.config = config or get_config()
+        self.state: Optional[AgentState] = None
+        
+        # 初始化 OpenAI 客户端
+        self.client = openai.OpenAI(
+            base_url=self.config.llm.base_url,
+            api_key=self.config.llm.api_key,
+        )
+        
+        # 注册所有工具
+        self._register_tools()
+        
+        # 设置日志
+        self._setup_logging()
+        
+        logger.info("JollyAgent initialized successfully")
+    
+    def _register_tools(self):
+        """注册所有可用的工具."""
+        executor = get_executor()
+        executor.register_tools(AVAILABLE_TOOLS)
+        logger.info(f"Registered {len(AVAILABLE_TOOLS)} tools")
+    
+    def _setup_logging(self):
+        """设置日志配置."""
+        # 确保日志文件路径是绝对路径
+        log_file = self.config.logging.file
+        if log_file and not os.path.isabs(log_file):
+            # 如果是相对路径，转换为绝对路径（相对于项目根目录）
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            log_file = os.path.join(project_root, log_file)
+        
+        # 确保日志目录存在
+        if log_file:
+            log_dir = os.path.dirname(log_file)
+            if log_dir and not os.path.exists(log_dir):
+                os.makedirs(log_dir, exist_ok=True)
+        
+        logging.basicConfig(
+            level=getattr(logging, self.config.logging.level),
+            format=self.config.logging.format,
+            handlers=[
+                logging.StreamHandler(),
+                logging.FileHandler(log_file) if log_file else logging.NullHandler()
+            ]
+        )
+    
+    def start_conversation(self, conversation_id: str) -> AgentState:
+        """开始新的对话."""
+        self.state = AgentState(conversation_id=conversation_id)
+        logger.info(f"Started new conversation: {conversation_id}")
+        return self.state
+    
+    def add_message(self, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Message:
+        """添加消息到对话历史."""
+        if not self.state:
+            raise ValueError("No active conversation. Call start_conversation() first.")
+        
+        message = Message(
+            role=role,
+            content=content,
+            metadata=metadata
+        )
+        self.state.messages.append(message)
+        logger.debug(f"Added {role} message: {content[:50]}...")
+        return message
+    
+    def _build_system_prompt(self) -> str:
+        """构建系统提示词."""
+        executor = get_executor()
+        tool_schemas = executor.get_tool_schemas()
+        
+        # 构建工具描述
+        tools_description = []
+        for schema in tool_schemas:
+            tool_desc = f"- {schema['name']}: {schema['description']}"
+            if schema['parameters']:
+                params_desc = []
+                for param in schema['parameters']:
+                    required = "必需" if param['required'] else "可选"
+                    params_desc.append(f"{param['name']} ({param['type']}, {required})")
+                tool_desc += f" 参数: {', '.join(params_desc)}"
+            tools_description.append(tool_desc)
+        
+        tools_text = "\n".join(tools_description)
+        
+        return f"""你是一个智能的 AI Agent，能够通过 ReAct（思考-行动-观察）循环来解决问题。
+
+你的能力包括：
+1. 思考：分析问题并制定解决方案
+2. 行动：调用合适的工具来执行任务
+3. 观察：分析工具执行结果并决定下一步
+
+可用工具：
+{tools_text}
+
+请按照以下格式进行响应：
+1. 首先进行思考（Thought）
+2. 然后调用工具（Tool Calls）
+3. 最后给出最终答案（Final Answer）
+
+工具调用格式：
+{{
+    "thought": "思考过程...",
+    "tool_calls": [
+        {{
+            "name": "工具名称",
+            "arguments": {{
+                "参数名": "参数值"
+            }}
+        }}
+    ],
+    "final_answer": "最终答案（如果任务完成）"
+}}
+
+记住：
+- 每个危险操作都需要用户确认
+- 优先使用安全的工具和命令
+- 如果任务完成，给出清晰的最终答案
+- 如果工具执行失败，分析错误原因并尝试其他方法
+"""
+    
+    def _build_messages_for_llm(self) -> List[Dict[str, str]]:
+        """构建发送给 LLM 的消息列表."""
+        messages = [{"role": "system", "content": self._build_system_prompt()}]
+        
+        # 添加对话历史
+        for msg in self.state.messages[-10:]:  # 只保留最近10条消息
+            messages.append({
+                "role": msg.role,
+                "content": msg.content
+            })
+        
+        return messages
+    
+    async def _call_llm(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        """调用 LLM API."""
+        try:
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model=self.config.llm.model,
+                messages=messages,
+                temperature=self.config.llm.temperature,
+                max_tokens=self.config.llm.max_tokens,
+                stream=False
+            )
+            
+            return {
+                "content": response.choices[0].message.content,
+                "usage": response.usage.dict() if response.usage else None
+            }
+            
+        except Exception as e:
+            logger.error(f"LLM API call failed: {e}")
+            raise
+    
+    def _parse_llm_response(self, response: str) -> ReActStep:
+        """解析 LLM 响应，提取思考、工具调用和最终答案."""
+        step = ReActStep()
+        
+        # 添加调试信息
+        logger.debug(f"Raw LLM response: {response[:200]}...")
+        
+        try:
+            # 尝试解析 JSON 格式的响应
+            if response.strip().startswith('{'):
+                logger.debug("Attempting to parse JSON response")
+                data = json.loads(response)
+                
+                # 解析思考过程
+                if 'thought' in data:
+                    step.thought = Thought(content=data['thought'])
+                
+                # 解析工具调用
+                if 'tool_calls' in data:
+                    for tool_call_data in data['tool_calls']:
+                        step.tool_calls.append(ToolCall(**tool_call_data))
+                
+                # 解析最终答案
+                if 'final_answer' in data:
+                    step.final_answer = data['final_answer']
+                
+                logger.debug(f"Parsed JSON: thought={bool(step.thought)}, tool_calls={len(step.tool_calls)}, final_answer={bool(step.final_answer)}")
+            
+            else:
+                logger.debug("Attempting to parse text response")
+                # 简单文本解析（备用方案）
+                lines = response.split('\n')
+                current_section = None
+                thought_content = []
+                
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    if line.lower().startswith('thought:'):
+                        current_section = 'thought'
+                        thought_content.append(line[7:].strip())
+                    elif line.lower().startswith('action:'):
+                        current_section = 'action'
+                        # 简单的工具调用解析
+                        if 'run_shell' in line:
+                            command = line.split('run_shell')[-1].strip()
+                            step.tool_calls.append(ToolCall(
+                                name='run_shell',
+                                arguments={'command': command}
+                            ))
+                    elif line.lower().startswith('answer:'):
+                        step.final_answer = line[7:].strip()
+                    elif current_section == 'thought':
+                        thought_content.append(line)
+                
+                if thought_content:
+                    step.thought = Thought(content=' '.join(thought_content))
+                
+                logger.debug(f"Parsed text: thought={bool(step.thought)}, tool_calls={len(step.tool_calls)}, final_answer={bool(step.final_answer)}")
+        
+        except Exception as e:
+            logger.warning(f"Failed to parse LLM response: {e}")
+            # 如果解析失败，将整个响应作为思考内容
+            step.thought = Thought(content=response)
+        
+        return step
+    
+    async def process_message(self, user_message: str) -> str:
+        """处理用户消息，执行 ReAct 循环."""
+        if not self.state:
+            raise ValueError("No active conversation. Call start_conversation() first.")
+        
+        # 重置完成状态，确保每个新消息都能进入ReAct循环
+        self.state.is_completed = False
+        
+        # 添加用户消息
+        self.add_message("user", user_message)
+        
+        logger.info(f"Processing message: {user_message[:50]}...")
+        
+        # 开始 ReAct 循环
+        max_iterations = 5  # 最大迭代次数
+        iteration = 0
+        
+        while iteration < max_iterations and not self.state.is_completed:
+            iteration += 1
+            logger.info(f"ReAct iteration {iteration}")
+            
+            # 创建当前步骤
+            current_step = ReActStep()
+            self.state.current_step = current_step
+            
+            try:
+                # 1. 思考阶段
+                logger.debug("Calling _think method")
+                await self._think(current_step)
+                logger.debug(f"After _think: thought={bool(current_step.thought)}, tool_calls={len(current_step.tool_calls)}, final_answer={bool(current_step.final_answer)}")
+                
+                # 2. 行动阶段
+                if current_step.tool_calls:
+                    logger.debug("Calling _act method")
+                    await self._act(current_step)
+                
+                # 3. 观察阶段
+                if current_step.observations:
+                    logger.debug("Calling _observe method")
+                    await self._observe(current_step)
+                
+                # 4. 检查是否完成
+                if current_step.final_answer:
+                    logger.debug("Task completed with final answer")
+                    self.state.is_completed = True
+                    self.add_message("assistant", current_step.final_answer)
+                    break
+                
+                # 将当前步骤添加到历史
+                self.state.react_steps.append(current_step)
+                
+            except Exception as e:
+                logger.error(f"Error in ReAct iteration {iteration}: {e}")
+                # 如果出错，给出错误回答
+                final_answer = f"抱歉，处理过程中出现错误：{str(e)}"
+                self.state.is_completed = True
+                self.add_message("assistant", final_answer)
+                break
+        
+        if not self.state.is_completed:
+            # 如果达到最大迭代次数仍未完成，给出默认回答
+            final_answer = "抱歉，我无法在有限步骤内完成这个任务。请尝试将任务分解为更小的步骤。"
+            self.state.is_completed = True
+            self.add_message("assistant", final_answer)
+        
+        return self.state.messages[-1].content
+    
+    async def _think(self, step: ReActStep):
+        """思考阶段：分析问题并制定计划."""
+        logger.debug("Starting think phase")
+        
+        # 构建提示词
+        messages = self._build_messages_for_llm()
+        messages.append({
+            "role": "user",
+            "content": """请分析当前问题并制定解决方案。
+
+你必须严格按照以下JSON格式返回响应：
+{
+    "thought": "你的思考过程...",
+    "tool_calls": [
+        {
+            "name": "工具名称",
+            "arguments": {
+                "参数名": "参数值"
+            }
+        }
+    ],
+    "final_answer": "最终答案（如果任务完成）"
+}
+
+如果不需要使用工具，tool_calls可以是空数组。
+如果任务完成，请提供final_answer。
+如果还需要继续执行，final_answer可以是null。"""
+        })
+        
+        # 调用 LLM
+        response = await self._call_llm(messages)
+        
+        # 解析响应
+        parsed_step = self._parse_llm_response(response["content"])
+        step.thought = parsed_step.thought
+        step.tool_calls = parsed_step.tool_calls
+        step.final_answer = parsed_step.final_answer
+        
+        if step.thought:
+            logger.debug(f"Thought: {step.thought.content[:100]}...")
+    
+    async def _act(self, step: ReActStep):
+        """行动阶段：执行工具调用."""
+        logger.debug("Starting act phase")
+        
+        executor = get_executor()
+        
+        for tool_call in step.tool_calls:
+            logger.info(f"Executing tool: {tool_call.name}")
+            
+            # 执行工具
+            result = await executor.execute_tool(
+                tool_call.name, 
+                **tool_call.arguments
+            )
+            
+            # 创建观察结果
+            observation = Observation(
+                tool_name=tool_call.name,
+                result=str(result.result) if result.success else result.error,
+                success=result.success,
+                error=result.error
+            )
+            step.observations.append(observation)
+            
+            logger.debug(f"Tool {tool_call.name} result: {result.success}")
+    
+    async def _observe(self, step: ReActStep):
+        """观察阶段：分析工具执行结果."""
+        logger.debug("Starting observe phase")
+        
+        # 构建包含观察结果的提示词
+        messages = self._build_messages_for_llm()
+        
+        # 添加观察结果
+        observations_text = "\n".join([
+            f"Tool {obs.tool_name}: {obs.result}" 
+            for obs in step.observations
+        ])
+        
+        messages.append({
+            "role": "user",
+            "content": f"""基于以下观察结果，请决定下一步行动或给出最终答案：
+
+观察结果：
+{observations_text}
+
+你必须严格按照以下JSON格式返回响应：
+{{
+    "thought": "你的思考过程...",
+    "tool_calls": [
+        {{
+            "name": "工具名称",
+            "arguments": {{
+                "参数名": "参数值"
+            }}
+        }}
+    ],
+    "final_answer": "最终答案（如果任务完成）"
+}}
+
+如果任务完成，请提供final_answer。
+如果还需要继续执行，final_answer可以是null。"""
+        })
+        
+        # 调用 LLM
+        response = await self._call_llm(messages)
+        
+        # 解析响应
+        parsed_step = self._parse_llm_response(response["content"])
+        step.final_answer = parsed_step.final_answer
+        
+        if step.final_answer:
+            logger.debug(f"Final answer: {step.final_answer[:100]}...")
+    
+    def get_conversation_summary(self) -> Dict[str, Any]:
+        """获取对话摘要."""
+        if not self.state:
+            return {}
+        
+        return {
+            "conversation_id": self.state.conversation_id,
+            "message_count": len(self.state.messages),
+            "react_steps_count": len(self.state.react_steps),
+            "is_completed": self.state.is_completed,
+            "last_message_time": self.state.messages[-1].timestamp if self.state.messages else None
+        }
+
+
+# 全局 Agent 实例
+_agent_instance: Optional[Agent] = None
+
+
+def get_agent() -> Agent:
+    """获取全局 Agent 实例."""
+    global _agent_instance
+    if _agent_instance is None:
+        _agent_instance = Agent()
+    return _agent_instance
+
+
+def reset_agent():
+    """重置全局 Agent 实例."""
+    global _agent_instance
+    _agent_instance = None
