@@ -20,10 +20,13 @@
 - `src/sandbox/` - 沙箱执行模块
 - `src/sandbox/docker.py` - Docker沙箱实现
 - `src/executor.py` - 工具执行器
-- `src/config.py` - 配置管理
+- `src/config.py` - 配置管理（完整实现，包含硅基流动API配置）
 - `tests/` - 测试目录
-- `requirements.txt` - 项目依赖
-- `pyproject.toml` - 项目配置文件
+- `tests/test_basic.py` - 基础测试文件
+- `tests/test_config.py` - 配置模块测试文件
+- `tests/test_api_connection.py` - API连接测试文件
+- `pyproject.toml` - 项目配置文件（uv管理）
+- `.venv/` - uv虚拟环境
 - `.gitignore` - Git忽略文件配置
 - `README.md` - 项目文档
 
@@ -40,9 +43,9 @@
 
 - [ ] 1.0 项目基础架构搭建
   - [x] 1.1 创建项目目录结构和基础文件
-  - [ ] 1.2 设置Python虚拟环境和依赖管理
-  - [ ] 1.3 配置开发工具（pytest, black, flake8）
-  - [ ] 1.4 创建基础配置文件（config.py）
+  - [x] 1.2 设置Python虚拟环境和依赖管理
+  - [x] 1.3 配置开发工具（pytest, black, flake8）
+  - [x] 1.4 创建基础配置文件（config.py）
   - [ ] 1.5 设置Git仓库和.gitignore
 
 - [ ] 2.0 ReAct循环核心实现
