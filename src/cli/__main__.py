@@ -1,6 +1,6 @@
 """CLI模块主入口点."""
 
-from .cli import main
+from src.cli import main
 
 if __name__ == "__main__":
     main() 

@@ -3,6 +3,7 @@
 import logging
 from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
@@ -97,20 +98,27 @@ class LayeredMemoryCoordinator(MemoryManager):
         # 获取会话摘要
         conversation_summary = await self.long_term_manager.get_conversation_summary(conversation_id)
         
-        # 获取相关长期记忆
+        # 获取相关长期记忆（跨对话ID搜索）
         relevant_memories = []
-        if memory_mode == "long" and query:
-            # 长对话模式：进行向量搜索
+        if query:
+            # 不限制对话ID，搜索所有相关记忆
             search_result = await self.long_term_manager.search_memory_with_summary(
-                query, conversation_id, limit=3
+                query, None, limit=5  # 移除conversation_id限制
             )
             relevant_memories = search_result.get("vector_memories", [])
-        elif memory_mode == "short" and conversation_summary:
-            # 短对话模式：如果有摘要，获取相关摘要
-            search_result = await self.long_term_manager.search_memory_with_summary(
-                query, conversation_id, limit=2
-            )
-            relevant_memories = search_result.get("vector_memories", [])
+            
+            # 如果当前对话有摘要，也包含进去
+            if conversation_summary:
+                # 将当前对话摘要作为相关记忆添加
+                from src.memory.manager import MemoryItem
+                summary_memory = MemoryItem(
+                    id=f"summary_{conversation_id}",
+                    content=conversation_summary,
+                    role="system",
+                    timestamp=datetime.now(),
+                    metadata={"type": "conversation_summary", "conversation_id": conversation_id}
+                )
+                relevant_memories.insert(0, summary_memory)  # 将摘要放在最前面
         
         context = MemoryContext(
             conversation_id=conversation_id,
