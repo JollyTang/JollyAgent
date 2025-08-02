@@ -69,11 +69,15 @@ class TestMemoryConfig:
         """Test default memory configuration values."""
         config = MemoryConfig()
 
-        assert config.persist_directory == "./chroma_db"
-        assert config.collection_name == "jollyagent_memory"
-        assert config.embedding_model == "text-embedding-3-small"
+        assert config.persist_directory == "./memory_db"
+        assert config.index_type == "IVF100,Flat"
+        assert config.embedding_dimension == 1024
+        assert config.embedding_model == "BAAI/bge-large-zh-v1.5"
         assert config.max_memory_items == 1000
         assert config.similarity_threshold == 0.7
+        assert config.enable_layered_memory is True
+        assert config.conversation_length_threshold == 10
+        assert config.short_term_rounds == 5
 
     def test_validation(self):
         """Test memory configuration validation."""
