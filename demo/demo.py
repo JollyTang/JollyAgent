@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from src.agent import Agent, get_agent
 
 # 配置日志
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
 async def demo_basic_conversation():
@@ -20,8 +20,8 @@ async def demo_basic_conversation():
     print("=== JollyAgent 基本对话演示 ===")
     
     # 在切换目录之前初始化Agent
-    agent = get_agent()
-    agent.start_conversation("demo_conversation")
+    agent = await get_agent()
+    await agent.start_conversation("demo_conversation")
     
     # 切换到demo目录
     demo_dir = os.path.dirname(os.path.abspath(__file__))
@@ -74,8 +74,8 @@ async def demo_react_cycle():
     print("\n=== ReAct循环演示 ===")
     
     # 在切换目录之前初始化Agent
-    agent = get_agent()
-    agent.start_conversation("react_demo")
+    agent = await get_agent()
+    await agent.start_conversation("react_demo")
     
     # 切换到demo目录
     demo_dir = os.path.dirname(os.path.abspath(__file__))
@@ -107,8 +107,8 @@ async def demo_file_operations():
     print("\n=== 文件操作演示 ===")
     
     # 在切换目录之前初始化Agent
-    agent = get_agent()
-    agent.start_conversation("file_demo")
+    agent = await get_agent()
+    await agent.start_conversation("file_demo")
     
     # 切换到demo目录
     demo_dir = os.path.dirname(os.path.abspath(__file__))
@@ -134,9 +134,9 @@ async def main():
     """主函数."""
     try:
         await demo_tool_system()
-        # await demo_basic_conversation()
+        await demo_basic_conversation()
         # await demo_react_cycle()
-        await demo_file_operations()
+        # await demo_file_operations()
         
         print("\n=== 演示完成 ===")
         print("JollyAgent 已成功实现以下功能:")

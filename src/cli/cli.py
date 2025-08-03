@@ -328,13 +328,17 @@ async def run_chat_session(
         }
         cli_logger.log_session_start(session_info)
         
-        # 获取Agent实例
+        # 获取Agent实例并重新设置确认管理器
         agent = await get_agent()
         
-        # 如果Agent没有确认管理器，重新创建
-        if enable_confirmation and not hasattr(agent, 'confirmation_manager'):
-            from src import UserConfirmation
+        # 重新设置确认管理器
+        if enable_confirmation:
+            from src.cli.confirm import UserConfirmation
             agent.confirmation_manager = UserConfirmation(auto_confirm=auto_confirm)
+            console.print(f"[green]已启用用户确认机制 (自动确认: {auto_confirm})[/green]")
+        else:
+            agent.confirmation_manager = None
+            console.print("[yellow]已禁用用户确认机制[/yellow]")
         
         # 开始对话
         if conversation_id:
@@ -424,7 +428,15 @@ async def process_user_message(
 ):
     """处理用户消息."""
     try:
-        if stream:
+        # 检查是否需要强制使用非流式调用
+        # 如果启用了用户确认且不是自动确认模式，强制使用非流式调用
+        if (hasattr(agent, 'confirmation_manager') and 
+            agent.confirmation_manager and 
+            not agent.confirmation_manager.auto_confirm):
+            # 强制使用非流式调用
+            console.print("[yellow]检测到非自动确认模式，已自动切换为非流式调用以确保用户确认功能正常[/yellow]")
+            response = await process_message_simple(agent, user_input, max_steps, verbose, show_thoughts)
+        elif stream:
             # 流式处理
             response = await process_message_stream(agent, user_input, max_steps, verbose, show_thoughts)
         else:
@@ -497,20 +509,18 @@ async def process_message_simple(
     # 添加用户消息
     agent.add_message("user", user_input)
     
-    # 显示处理状态
-    with console.status("[bold green]处理中...", spinner="dots"):
-        try:
-            # 调用Agent处理消息
-            response = await agent.process_message(user_input)
-            
-            # 显示最终回答
-            console.print(f"\n[bold green]Agent[/bold green]: {response}\n")
-            
-            return response
-            
-        except Exception as e:
-            console.print(f"[red]处理失败: {e}[/red]")
-            raise e
+    try:
+        # 调用Agent处理消息
+        response = await agent.process_message(user_input)
+        
+        # 显示最终回答
+        console.print(f"\n[bold green]Agent[/bold green]: {response}\n")
+        
+        return response
+        
+    except Exception as e:
+        console.print(f"[red]处理失败: {e}[/red]")
+        raise e
 
 
 def show_main_menu():

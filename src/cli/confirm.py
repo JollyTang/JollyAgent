@@ -58,41 +58,33 @@ class UserConfirmation:
     
     def _display_tool_calls(self, tool_calls: List[ToolCall], step_info: Optional[str] = None):
         """显示工具调用信息."""
-        console.print("\n" + "="*60)
+        console.print("\n" + "="*50)
         console.print("[bold blue]🔧 工具调用确认[/bold blue]")
         
         if step_info:
             console.print(f"[dim]{step_info}[/dim]")
         
-        table = Table(title="待确认的工具调用")
-        table.add_column("序号", style="cyan", justify="center")
-        table.add_column("工具名称", style="green")
-        table.add_column("参数", style="yellow")
-        table.add_column("描述", style="white")
-        
+        # 简化显示，不使用复杂表格
         for i, tool_call in enumerate(tool_calls, 1):
-            # 格式化参数
-            args_str = self._format_arguments(tool_call.arguments)
-            
-            # 获取工具描述
+            args_str = self._format_arguments_simple(tool_call.arguments)
             description = self._get_tool_description(tool_call.name)
             
-            table.add_row(
-                str(i),
-                tool_call.name,
-                args_str,
-                description
-            )
+            console.print(f"\n[bold]工具 {i}:[/bold] {tool_call.name}")
+            console.print(f"[dim]描述:[/dim] {description}")
+            console.print(f"[dim]参数:[/dim] {args_str}")
         
-        console.print(table)
-        console.print("="*60)
+        console.print("="*50)
     
     async def _confirm_single_tool_call(self, tool_call: ToolCall, index: int, total: int) -> bool:
         """确认单个工具调用."""
         console.print(f"\n[bold]工具调用 {index}/{total}:[/bold] {tool_call.name}")
         
-        # 显示详细信息
-        self._display_tool_call_details(tool_call)
+        # 显示简化信息
+        args_str = self._format_arguments_simple(tool_call.arguments)
+        description = self._get_tool_description(tool_call.name)
+        
+        console.print(f"[dim]描述:[/dim] {description}")
+        console.print(f"[dim]参数:[/dim] {args_str}")
         
         # 获取用户选择
         while True:
@@ -117,38 +109,26 @@ class UserConfirmation:
                 return False
             elif choice == "d":
                 # 显示详细信息
-                self._display_tool_call_details(tool_call, detailed=True)
+                self._display_tool_call_details_simple(tool_call)
                 continue
             elif choice == "h":
                 # 显示帮助
                 self._show_help()
                 continue
     
-    def _display_tool_call_details(self, tool_call: ToolCall, detailed: bool = False):
-        """显示工具调用详细信息."""
-        panel_content = f"""
-[bold green]工具名称:[/bold green] {tool_call.name}
-
-[bold yellow]参数:[/bold yellow]
-{self._format_arguments_detailed(tool_call.arguments)}
-
-[bold cyan]工具描述:[/bold cyan]
-{self._get_tool_description(tool_call.name)}
-        """
+    def _display_tool_call_details_simple(self, tool_call: ToolCall):
+        """显示简化的工具调用详细信息."""
+        console.print(f"\n[bold green]工具名称:[/bold green] {tool_call.name}")
+        console.print(f"[bold yellow]参数详情:[/bold yellow]")
         
-        if detailed:
-            panel_content += f"""
-
-[bold red]安全警告:[/bold red]
-{self._get_tool_safety_warning(tool_call.name)}
-        """
+        for key, value in tool_call.arguments.items():
+            if isinstance(value, str):
+                console.print(f"  {key}: {value}")
+            else:
+                console.print(f"  {key}: {value}")
         
-        panel = Panel(
-            panel_content,
-            title="工具调用详情",
-            border_style="blue"
-        )
-        console.print(panel)
+        console.print(f"[bold cyan]工具描述:[/bold cyan] {self._get_tool_description(tool_call.name)}")
+        console.print(f"[bold red]安全警告:[/bold red] {self._get_tool_safety_warning(tool_call.name)}")
     
     def _format_arguments(self, arguments: Dict[str, Any]) -> str:
         """格式化参数显示."""
@@ -179,6 +159,20 @@ class UserConfirmation:
                 formatted.append(f"[bold]{key}:[/bold] {value}")
         
         return "\n\n".join(formatted)
+    
+    def _format_arguments_simple(self, arguments: Dict[str, Any]) -> str:
+        """简化参数格式化."""
+        if not arguments:
+            return "无参数"
+        
+        formatted = []
+        for key, value in arguments.items():
+            if isinstance(value, str) and len(value) > 30:
+                formatted.append(f"{key}: {value[:30]}...")
+            else:
+                formatted.append(f"{key}: {value}")
+        
+        return ", ".join(formatted)
     
     def _get_tool_description(self, tool_name: str) -> str:
         """获取工具描述."""
@@ -221,8 +215,7 @@ class UserConfirmation:
 • [cyan]h[/cyan] - 显示此帮助信息
         """
         
-        panel = Panel(help_text, title="帮助", border_style="green")
-        console.print(panel)
+        console.print(help_text)
     
     def add_to_history(self, tool_call: ToolCall, confirmed: bool, reason: str = ""):
         """添加到确认历史."""
