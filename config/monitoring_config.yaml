@@ -1,0 +1,123 @@
+# JollyAgent 监控系统配置
+
+# 数据库配置
+database:
+  clickhouse:
+    host: clickhouse
+    port: 9000
+    database: jollyagent
+    user: default
+    password: jollyagent123
+    http_port: 8123
+
+# Kafka配置
+kafka:
+  bootstrap_servers: kafka:9092
+  topics:
+    executions: jollyagent-executions
+    metrics: jollyagent-metrics
+    events: jollyagent-events
+  consumer_group: jollyagent-consumer
+  producer_config:
+    acks: all
+    retries: 3
+    batch_size: 16384
+    linger_ms: 1
+    buffer_memory: 33554432
+
+# Flink配置
+flink:
+  jobmanager:
+    host: flink-jobmanager
+    port: 6123
+    web_port: 8081
+  taskmanager:
+    host: flink-taskmanager
+    port: 6124
+  checkpoint_interval: 60000
+  parallelism: 2
+
+# Grafana配置
+grafana:
+  host: grafana
+  port: 3000
+  admin_user: admin
+  admin_password: admin
+  datasources:
+    clickhouse:
+      name: ClickHouse
+      type: clickhouse
+      url: http://clickhouse:8123
+      database: jollyagent
+      user: default
+      password: jollyagent123
+
+# 监控配置
+monitoring:
+  # 数据收集配置
+  data_collection:
+    batch_size: 100
+    flush_interval: 5000 # 毫秒
+    max_queue_size: 10000
+
+  # 追踪配置
+  tracing:
+    enabled: true
+    sample_rate: 1.0
+    max_trace_duration: 300000 # 毫秒
+
+  # 指标配置
+  metrics:
+    enabled: true
+    collection_interval: 60000 # 毫秒
+    retention_days: 30
+
+  # 日志配置
+  logging:
+    level: INFO
+    format: json
+    output: stdout
+
+# 告警配置
+alerts:
+  enabled: true
+  channels:
+    - name: slack
+      type: slack
+      webhook_url: ""
+    - name: email
+      type: email
+      smtp_host: ""
+      smtp_port: 587
+      username: ""
+      password: ""
+
+  rules:
+    - name: high_error_rate
+      condition: "error_rate > 0.05"
+      duration: "5m"
+      severity: warning
+
+    - name: high_latency
+      condition: "avg_latency > 1000"
+      duration: "5m"
+      severity: warning
+
+    - name: service_down
+      condition: "service_status != 'healthy'"
+      duration: "1m"
+      severity: critical
+
+# 数据保留策略
+retention:
+  clickhouse:
+    default_ttl: 30d
+    metrics_ttl: 90d
+    logs_ttl: 7d
+    traces_ttl: 7d
+
+  backup:
+    enabled: true
+    schedule: "0 2 * * *" # 每天凌晨2点
+    retention_days: 7
+    storage_path: "/backup"

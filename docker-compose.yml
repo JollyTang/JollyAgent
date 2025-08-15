@@ -1,0 +1,195 @@
+version: "3.8"
+
+services:
+  # Zookeeper 服务 - Kafka依赖
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: jollyagent-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+      - ZOOKEEPER_TICK_TIME=2000
+      - ZOOKEEPER_INIT_LIMIT=5
+      - ZOOKEEPER_SYNC_LIMIT=2
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - jollyagent-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep zookeeper | grep -v grep || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # Kafka 服务 - 使用Zookeeper模式
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: jollyagent-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    depends_on:
+      - zookeeper
+    networks:
+      - jollyagent-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ClickHouse 服务 - 使用官方镜像
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: jollyagent-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+      - "9009:9009"
+    environment:
+      - CLICKHOUSE_DB=jollyagent
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=jollyagent123
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+      - clickhouse_config:/etc/clickhouse-server
+    networks:
+      - jollyagent-network
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:8123/ping",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Flink JobManager - 使用官方镜像
+  flink-jobmanager:
+    image: apache/flink:1.18.1
+    container_name: jollyagent-flink-jobmanager
+    ports:
+      - "8081:8081"
+      - "6123:6123"
+    environment:
+      - FLINK_PROPERTIES=jobmanager.rpc.address:flink-jobmanager
+    command: jobmanager
+    volumes:
+      - flink_data:/opt/flink/data
+      - flink_logs:/opt/flink/logs
+    depends_on:
+      - kafka
+    networks:
+      - jollyagent-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Flink TaskManager - 使用官方镜像
+  flink-taskmanager:
+    image: apache/flink:1.18.1
+    container_name: jollyagent-flink-taskmanager
+    ports:
+      - "6124:6124"
+      - "6125:6125"
+    environment:
+      - FLINK_PROPERTIES=jobmanager.rpc.address:flink-jobmanager
+    command: taskmanager
+    volumes:
+      - flink_data:/opt/flink/data
+      - flink_logs:/opt/flink/logs
+    depends_on:
+      - flink-jobmanager
+    networks:
+      - jollyagent-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6124/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Grafana 服务 - 使用官方镜像
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: jollyagent-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - grafana_config:/etc/grafana
+    depends_on:
+      - clickhouse
+    networks:
+      - jollyagent-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# 数据卷定义
+volumes:
+  zookeeper_data:
+    driver: local
+  zookeeper_logs:
+    driver: local
+  kafka_data:
+    driver: local
+  flink_data:
+    driver: local
+  flink_logs:
+    driver: local
+  clickhouse_data:
+    driver: local
+  clickhouse_logs:
+    driver: local
+  clickhouse_config:
+    driver: local
+  grafana_data:
+    driver: local
+  grafana_config:
+    driver: local
+
+# 网络定义
+networks:
+  jollyagent-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
