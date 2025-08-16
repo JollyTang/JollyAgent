@@ -3,23 +3,22 @@ version: "3.8"
 services:
   # Zookeeper 服务 - Kafka依赖
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.4.0
+    image: zookeeper:3.9.1
     container_name: jollyagent-zookeeper
     ports:
       - "2181:2181"
     environment:
-      - ZOOKEEPER_CLIENT_PORT=2181
-      - ZOOKEEPER_TICK_TIME=2000
-      - ZOOKEEPER_INIT_LIMIT=5
-      - ZOOKEEPER_SYNC_LIMIT=2
+      - ZOO_MY_ID=1
+      - ZOO_SERVERS=server.1=0.0.0.0:2888:3888;2181
+      - ZOO_4LW_COMMANDS_WHITELIST=*
     volumes:
-      - zookeeper_data:/var/lib/zookeeper/data
-      - zookeeper_logs:/var/lib/zookeeper/log
+      - zookeeper_data:/data
+      - zookeeper_logs:/datalog
     networks:
       - jollyagent-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "ps aux | grep zookeeper | grep -v grep || exit 1"]
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -27,21 +26,27 @@ services:
 
   # Kafka 服务 - 使用Zookeeper模式
   kafka:
-    image: confluentinc/cp-kafka:7.4.0
+    image: bitnami/kafka:3.5.1
     container_name: jollyagent-kafka
     ports:
       - "9092:9092"
+      - "9101:9101"
     environment:
       - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
       - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
       - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
       - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_DELETE_TOPIC_ENABLE=true
       - KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
       - KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR=1
       - KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+      - KAFKA_CFG_LOG_RETENTION_HOURS=168
+      - KAFKA_CFG_LOG_SEGMENT_BYTES=1073741824
+      - KAFKA_CFG_LOG_RETENTION_CHECK_INTERVAL_MS=300000
+      - ALLOW_PLAINTEXT_LISTENER=yes
     volumes:
-      - kafka_data:/var/lib/kafka/data
+      - kafka_data:/bitnami/kafka
     depends_on:
       - zookeeper
     networks:
@@ -49,7 +54,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test:
-        ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+        [
+          "CMD-SHELL",
+          "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -93,12 +101,11 @@ services:
     ports:
       - "8081:8081"
       - "6123:6123"
-    environment:
-      - FLINK_PROPERTIES=jobmanager.rpc.address:flink-jobmanager
     command: jobmanager
     volumes:
       - flink_data:/opt/flink/data
       - flink_logs:/opt/flink/logs
+      - ./config/flink-jobmanager-conf.yaml:/opt/flink/conf/flink-conf.yaml
     depends_on:
       - kafka
     networks:
@@ -118,19 +125,22 @@ services:
     ports:
       - "6124:6124"
       - "6125:6125"
-    environment:
-      - FLINK_PROPERTIES=jobmanager.rpc.address:flink-jobmanager
     command: taskmanager
     volumes:
       - flink_data:/opt/flink/data
       - flink_logs:/opt/flink/logs
+      - ./config/flink-taskmanager-conf.yaml:/opt/flink/conf/flink-conf.yaml
     depends_on:
       - flink-jobmanager
     networks:
       - jollyagent-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:6124/ || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "ps aux | grep TaskManagerRunner | grep -v grep || exit 1",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -146,7 +156,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_SECURITY_ADMIN_USER=admin
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+      # - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
     volumes:
       - grafana_data:/var/lib/grafana
       - grafana_config:/etc/grafana
@@ -169,6 +179,8 @@ volumes:
   zookeeper_logs:
     driver: local
   kafka_data:
+    driver: local
+  kafka_logs:
     driver: local
   flink_data:
     driver: local

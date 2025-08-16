@@ -1,0 +1,8 @@
+# Flink JobManager Configuration
+jobmanager.rpc.address: flink-jobmanager
+jobmanager.rpc.port: 6123
+jobmanager.bind-host: 0.0.0.0
+jobmanager.memory.process.size: 1600m
+jobmanager.execution.failover-strategy: region
+blob.server.port: 6124
+query.server.port: 6125

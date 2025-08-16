@@ -2,7 +2,7 @@
 
 # JollyAgent 监控系统停止和清理脚本
 # 作者: JollyAgent Team
-# 版本: 1.0.0
+# 版本: 2.0.0
 
 set -e
 
@@ -47,6 +47,14 @@ show_usage() {
     echo "  $0 reset   # 完全重置"
 }
 
+# 检查Docker是否运行
+check_docker() {
+    if ! docker info > /dev/null 2>&1; then
+        log_error "Docker服务未运行"
+        exit 1
+    fi
+}
+
 # 停止服务
 stop_services() {
     log_info "停止监控服务..."
@@ -76,7 +84,10 @@ clean_volumes() {
     log_info "清理数据卷..."
     
     local volumes=(
+        "jollyagent_zookeeper_data"
+        "jollyagent_zookeeper_logs"
         "jollyagent_kafka_data"
+        "jollyagent_kafka_logs"
         "jollyagent_flink_data"
         "jollyagent_flink_logs"
         "jollyagent_clickhouse_data"
@@ -89,7 +100,7 @@ clean_volumes() {
     for volume in "${volumes[@]}"; do
         if docker volume ls -q | grep -q "^$volume$"; then
             log_warning "删除数据卷: $volume"
-            docker volume rm "$volume" || log_error "无法删除数据卷 $volume"
+            docker volume rm "$volume" 2>/dev/null || log_error "无法删除数据卷 $volume"
         fi
     done
     
@@ -102,7 +113,7 @@ clean_networks() {
     
     if docker network ls | grep -q jollyagent-network; then
         log_warning "删除网络: jollyagent-network"
-        docker network rm jollyagent-network || log_error "无法删除网络 jollyagent-network"
+        docker network rm jollyagent-network 2>/dev/null || log_error "无法删除网络 jollyagent-network"
     fi
     
     log_success "网络清理完成"
@@ -113,17 +124,17 @@ clean_images() {
     log_info "清理镜像..."
     
     local images=(
-        "jollyagent_kafka"
-        "jollyagent_flink-jobmanager"
-        "jollyagent_flink-taskmanager"
-        "jollyagent_clickhouse"
-        "jollyagent_grafana"
+        "apache/flink:1.18.1"
+        "bitnami/kafka:3.5.1"
+        "zookeeper:3.9.1"
+        "clickhouse/clickhouse-server:23.8"
+        "grafana/grafana:10.1.0"
     )
     
     for image in "${images[@]}"; do
-        if docker images | grep -q "$image"; then
+        if docker images | grep -q "$(echo $image | cut -d':' -f1)"; then
             log_warning "删除镜像: $image"
-            docker rmi "$image" || log_error "无法删除镜像 $image"
+            docker rmi "$image" 2>/dev/null || log_error "无法删除镜像 $image"
         fi
     done
     
@@ -176,6 +187,12 @@ backup_data() {
         log_success "Docker Compose文件已备份"
     fi
     
+    # 备份脚本文件
+    if [ -d "scripts" ]; then
+        cp -r scripts "$backup_dir/"
+        log_success "脚本文件已备份"
+    fi
+    
     log_success "数据备份完成: $backup_dir"
 }
 
@@ -209,7 +226,7 @@ show_reset_confirmation() {
     echo "将执行以下操作："
     echo "  1. 停止所有服务"
     echo "  2. 清理所有数据"
-    echo "  3. 重新构建镜像"
+    echo "  3. 重新拉取镜像"
     echo "  4. 重新启动服务"
     echo ""
     
@@ -220,20 +237,43 @@ show_reset_confirmation() {
     fi
 }
 
-# 重建服务
-rebuild_services() {
-    log_info "重新构建服务..."
+# 重新拉取镜像
+pull_images() {
+    log_info "重新拉取镜像..."
     
-    docker-compose build --no-cache
-    log_success "服务重新构建完成"
+    local images=(
+        "zookeeper:3.9.1"
+        "bitnami/kafka:3.5.1"
+        "apache/flink:1.18.1"
+        "clickhouse/clickhouse-server:23.8"
+        "grafana/grafana:10.1.0"
+    )
+    
+    for image in "${images[@]}"; do
+        log_info "拉取镜像: $image"
+        docker pull "$image" || log_error "无法拉取镜像 $image"
+    done
+    
+    log_success "镜像拉取完成"
 }
 
 # 重启服务
 restart_services() {
     log_info "重新启动服务..."
     
-    docker-compose up -d
-    log_success "服务重新启动完成"
+    # 调用启动脚本
+    if [ -f "./scripts/start_monitoring.sh" ]; then
+        ./scripts/start_monitoring.sh
+    else
+        log_error "启动脚本不存在"
+        exit 1
+    fi
+}
+
+# 显示当前状态
+show_status() {
+    log_info "当前服务状态："
+    docker-compose ps 2>/dev/null || log_info "没有运行的服务"
 }
 
 # 主函数
@@ -241,20 +281,25 @@ main() {
     local action=${1:-stop}
     
     echo "=========================================="
-    echo "  JollyAgent 监控系统停止和清理脚本"
+    echo "  JollyAgent 监控系统停止和清理脚本 v2.0"
     echo "=========================================="
     echo ""
     
     # 切换到脚本所在目录
     cd "$(dirname "$0")/.."
     
+    # 检查Docker
+    check_docker
+    
     case $action in
         "stop")
             log_info "执行停止操作..."
+            show_status
             stop_services
             ;;
         "down")
             log_info "执行停止并移除操作..."
+            show_status
             down_services
             ;;
         "clean")
@@ -279,7 +324,7 @@ main() {
             clean_images
             clean_logs
             clean_temp_files
-            rebuild_services
+            pull_images
             restart_services
             log_success "重置操作完成"
             ;;

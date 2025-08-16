@@ -1,0 +1,59 @@
+# Kafka 配置
+kafka:
+  # 连接配置
+  bootstrap_servers: "localhost:9092"
+  client_id: "jollyagent-producer"
+
+  # 生产者配置
+  producer:
+    acks: "all"
+    retries: 3
+    batch_size: 16384
+    linger_ms: 1
+    buffer_memory: 33554432
+    compression_type: "snappy"
+    key_serializer: "org.apache.kafka.common.serialization.StringSerializer"
+    value_serializer: "org.apache.kafka.common.serialization.StringSerializer"
+
+  # 消费者配置
+  consumer:
+    group_id: "jollyagent-consumer-group"
+    auto_offset_reset: "earliest"
+    enable_auto_commit: true
+    auto_commit_interval_ms: 1000
+    session_timeout_ms: 30000
+    key_deserializer: "org.apache.kafka.common.serialization.StringDeserializer"
+    value_deserializer: "org.apache.kafka.common.serialization.StringDeserializer"
+
+  # 主题配置
+  topics:
+    executions: "jollyagent-executions"
+    metrics: "jollyagent-metrics"
+    events: "jollyagent-events"
+    errors: "jollyagent-errors"
+
+  # 主题设置
+  topic_configs:
+    executions:
+      partitions: 3
+      replication_factor: 1
+      retention_hours: 168 # 7天
+      cleanup_policy: "delete"
+
+    metrics:
+      partitions: 3
+      replication_factor: 1
+      retention_hours: 720 # 30天
+      cleanup_policy: "delete"
+
+    events:
+      partitions: 3
+      replication_factor: 1
+      retention_hours: 168 # 7天
+      cleanup_policy: "delete"
+
+    errors:
+      partitions: 1
+      replication_factor: 1
+      retention_hours: 8760 # 1年
+      cleanup_policy: "delete"

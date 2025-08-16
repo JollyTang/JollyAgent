@@ -1,0 +1,9 @@
+# Flink TaskManager Configuration
+jobmanager.rpc.address: flink-jobmanager
+jobmanager.rpc.port: 6123
+taskmanager.bind-host: 0.0.0.0
+taskmanager.memory.process.size: 1728m
+taskmanager.numberOfTaskSlots: 1
+parallelism.default: 1
+blob.server.port: 6124
+query.server.port: 6125
