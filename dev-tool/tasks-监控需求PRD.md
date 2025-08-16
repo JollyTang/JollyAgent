@@ -95,12 +95,12 @@
   - [x] 0.10 编写停止和清理脚本
   - [x] 0.11 测试 Docker 环境的一键启动
   - [x] 0.12 验证所有服务的健康状态
-  - [ ] 0.13 编写部署文档和故障排查指南
+  - [x] 0.13 编写部署文档和故障排查指南
 
 - [ ] 1.0 基础数据收集系统搭建
 
-  - [ ] 1.1 集成 OpenTelemetry Python SDK 到 Agent 核心代码
-  - [ ] 1.2 配置 trace 和 span 收集机制
+  - [x] 1.1 集成 OpenTelemetry Python SDK 到 Agent 核心代码
+  - [x] 1.2 配置 trace 和 span 收集机制
   - [ ] 1.3 实现自定义 instrumentation
   - [ ] 1.4 实现执行步骤追踪（Think-Act-Observe-Response）
   - [ ] 1.5 实现元数据收集（时间戳、状态、错误信息等）
