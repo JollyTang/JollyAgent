@@ -102,7 +102,7 @@
   - [x] 1.1 集成 OpenTelemetry Python SDK 到 Agent 核心代码
   - [x] 1.2 配置 trace 和 span 收集机制
   - [x] 1.3 实现自定义 instrumentation
-  - [ ] 1.4 实现执行步骤追踪（Think-Act-Observe-Response）
+  - [x] 1.4 实现执行步骤追踪（Think-Act-Observe-Response）
   - [ ] 1.5 实现元数据收集（时间戳、状态、错误信息等）
   - [ ] 1.6 配置本地文件存储作为备份
   - [ ] 1.7 编写数据收集器的单元测试

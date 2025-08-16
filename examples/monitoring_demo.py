@@ -1,0 +1,160 @@
+"""
+监控功能演示脚本
+
+展示如何通过配置控制监控功能的启用和禁用。
+"""
+
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+# 添加项目根目录到 Python 路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.agent import Agent
+from src.config import get_config, reload_config
+from src.monitoring.monitoring_manager import get_monitoring_manager
+
+
+async def demo_with_monitoring_enabled():
+    """演示启用监控功能"""
+    print("=== 启用监控功能的演示 ===")
+    
+    # 创建配置并启用监控
+    config = get_config()
+    config.monitoring.enable_monitoring = True
+    config.monitoring.enable_step_tracking = True
+    config.monitoring.enable_agent_tracing = True
+    config.monitoring.enable_llm_tracing = True
+    
+    # 创建 Agent 实例
+    agent = Agent(config=config)
+    
+    # 开始对话
+    conversation_id = "demo_monitoring_enabled"
+    await agent.start_conversation(conversation_id)
+    
+    # 发送消息
+    user_message = "请帮我计算 2 + 3 的结果"
+    print(f"用户消息: {user_message}")
+    
+    try:
+        response = await agent.process_message(user_message)
+        print(f"Agent 响应: {response}")
+    except Exception as e:
+        print(f"处理消息时出错: {e}")
+    
+    # 获取监控统计信息
+    manager = get_monitoring_manager()
+    stats = manager.get_statistics()
+    print("\n监控统计信息:")
+    print(json.dumps(stats, indent=2, ensure_ascii=False))
+    
+    # 导出监控数据到配置的备份目录
+    if manager.export_data():
+        print(f"\n监控数据已导出到配置的备份目录: {config.monitoring.backup_directory}")
+    
+    print("\n" + "="*50)
+
+
+async def demo_with_monitoring_disabled():
+    """演示禁用监控功能"""
+    print("=== 禁用监控功能的演示 ===")
+    
+    # 创建配置并禁用监控
+    config = get_config()
+    config.monitoring.enable_monitoring = False
+    
+    # 创建 Agent 实例
+    agent = Agent(config=config)
+    
+    # 开始对话
+    conversation_id = "demo_monitoring_disabled"
+    await agent.start_conversation(conversation_id)
+    
+    # 发送消息
+    user_message = "请帮我计算 5 + 7 的结果"
+    print(f"用户消息: {user_message}")
+    
+    try:
+        response = await agent.process_message(user_message)
+        print(f"Agent 响应: {response}")
+    except Exception as e:
+        print(f"处理消息时出错: {e}")
+    
+    # 检查监控状态
+    manager = get_monitoring_manager()
+    print(f"\n监控是否启用: {manager.is_monitoring_enabled()}")
+    
+    print("\n" + "="*50)
+
+
+async def demo_step_tracking():
+    """演示执行步骤追踪"""
+    print("=== 执行步骤追踪演示 ===")
+    
+    # 创建配置并启用步骤追踪
+    config = get_config()
+    config.monitoring.enable_monitoring = True
+    config.monitoring.enable_step_tracking = True
+    config.monitoring.enable_agent_tracing = True
+    
+    # 创建 Agent 实例
+    agent = Agent(config=config)
+    
+    # 开始对话
+    conversation_id = "demo_step_tracking"
+    await agent.start_conversation(conversation_id)
+    
+    # 发送需要多步骤处理的消息
+    user_message = "请帮我查找当前目录下的所有 Python 文件，然后统计它们的行数"
+    print(f"用户消息: {user_message}")
+    
+    try:
+        response = await agent.process_message(user_message)
+        print(f"Agent 响应: {response}")
+    except Exception as e:
+        print(f"处理消息时出错: {e}")
+    
+    # 获取步骤追踪统计信息
+    manager = get_monitoring_manager()
+    if manager.is_initialized and manager.instrumentation:
+        step_tracker = manager.instrumentation.step_tracker
+        stats = step_tracker.get_statistics()
+        print("\n步骤追踪统计信息:")
+        print(json.dumps(stats, indent=2, ensure_ascii=False))
+        
+        # 导出步骤追踪数据到配置的备份目录
+        export_path = Path(config.monitoring.backup_directory) / "step_tracking_demo.json"
+        if step_tracker.export_data(str(export_path)):
+            print(f"\n步骤追踪数据已导出到: {export_path}")
+    
+    print("\n" + "="*50)
+
+
+async def main():
+    """主函数"""
+    print("JollyAgent 监控功能演示")
+    print("="*50)
+    
+    try:
+        # 演示启用监控功能
+        await demo_with_monitoring_enabled()
+        
+        # 演示禁用监控功能
+        await demo_with_monitoring_disabled()
+        
+        # 演示执行步骤追踪
+        await demo_step_tracking()
+        
+        print("\n演示完成！")
+        
+    except Exception as e:
+        print(f"演示过程中出错: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

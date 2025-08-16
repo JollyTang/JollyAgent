@@ -84,3 +84,26 @@ summaries.json
 demo/*.txt
 demo/*.log
 demo/temp_*
+
+
+# Monitoring and Telemetry Data
+monitoring_data/
+*.monitoring_data.json
+monitoring_data_*.json
+step_tracking_*.json
+telemetry_data/
+opentelemetry_data/
+*.trace
+*.span
+*.metrics
+
+# OpenTelemetry exports
+*.otlp
+*.otlp.json
+*.otlp.gz
+
+# Performance and monitoring exports
+performance_data/
+metrics_data/
+execution_traces/
+# Monitoring and Telemetry Data

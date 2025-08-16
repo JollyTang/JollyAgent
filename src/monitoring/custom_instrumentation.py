@@ -15,6 +15,7 @@ from dataclasses import dataclass, asdict
 
 from .opentelemetry_integration import get_global_integration
 from .data_collector import DataCollector
+from .step_tracker import get_global_step_tracker, initialize_global_step_tracker, StepType, StepStatus
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class CustomInstrumentation:
         self.config = config or InstrumentationConfig()
         self.ot_integration = get_global_integration()
         self.data_collector = DataCollector()
+        self.step_tracker = get_global_step_tracker() or initialize_global_step_tracker()
         
         # 性能指标
         self.performance_metrics = {
@@ -138,6 +140,10 @@ class CustomInstrumentation:
                 "agent_id": id(agent_instance)
             })
             
+            # 开始执行步骤追踪
+            cycle_number = len(getattr(agent_instance.state, 'react_steps', [])) + 1
+            cycle_id = instrumentation.step_tracker.start_cycle(session_id, cycle_number, user_message)
+            
             start_time = time.time()
             success = True
             error_message = None
@@ -160,6 +166,9 @@ class CustomInstrumentation:
             finally:
                 duration = time.time() - start_time
                 instrumentation.performance_metrics["agent_executions"] += 1
+                
+                # 结束执行步骤追踪
+                instrumentation.step_tracker.end_cycle(session_id, result, success, error_message)
                 
                 # 记录事件
                 instrumentation.data_collector.record_event(
@@ -191,21 +200,30 @@ class CustomInstrumentation:
         
     def _instrument_think(self, original_method):
         """为 _think 方法添加 instrumentation"""
-        async def wrapper(agent_instance, step):
+        async def wrapper(self, step):
             # 获取 instrumentation 实例
-            instrumentation = getattr(agent_instance, '_instrumentation', None)
+            instrumentation = getattr(self, '_instrumentation', None)
             if not instrumentation:
-                return await original_method(agent_instance, step)
+                return await original_method(step)
                 
-            session_id = getattr(agent_instance.state, 'conversation_id', 'unknown')
+            session_id = getattr(self.state, 'conversation_id', 'unknown')
+            
+            # 开始思考步骤追踪
+            step_id = instrumentation.step_tracker.start_step(session_id, StepType.THINK, {
+                "step_number": len(self.state.react_steps) + 1,
+                "has_thought": bool(step.thought),
+                "tool_calls_count": len(step.tool_calls),
+                "has_final_answer": bool(step.final_answer)
+            })
+            
             start_time = time.time()
             
             try:
                 with instrumentation._trace_span("agent.think", {
                     "session.id": session_id,
-                    "step.number": len(agent_instance.state.react_steps) + 1
+                    "step.number": len(self.state.react_steps) + 1
                 }):
-                    await original_method(agent_instance, step)
+                    await original_method(step)
                     
                     # 记录思考结果
                     thought_data = {
@@ -222,16 +240,22 @@ class CustomInstrumentation:
                         
             except Exception as e:
                 instrumentation.performance_metrics["total_errors"] += 1
+                # 结束思考步骤追踪（失败）
+                instrumentation.step_tracker.end_step(session_id, step_id, None, StepStatus.FAILED, str(e))
                 raise
             finally:
                 duration = time.time() - start_time
+                
+                # 结束思考步骤追踪（成功）
+                if 'thought_data' in locals():
+                    instrumentation.step_tracker.end_step(session_id, step_id, thought_data, StepStatus.SUCCESS)
                 
                 # 记录事件
                 instrumentation.data_collector.record_event(
                     session_id=session_id,
                     event_type="think",
                     component="agent",
-                    data=thought_data,
+                    data=thought_data if 'thought_data' in locals() else {},
                     duration=duration,
                     success=True
                 )
@@ -251,6 +275,18 @@ class CustomInstrumentation:
         @functools.wraps(original_method)
         async def wrapper(self, step):
             session_id = getattr(self.state, 'conversation_id', 'unknown')
+            
+            # 获取 instrumentation 实例
+            instrumentation = getattr(self, '_instrumentation', None)
+            if not instrumentation:
+                return await original_method(step)
+            
+            # 开始行动步骤追踪
+            step_id = instrumentation.step_tracker.start_step(session_id, StepType.ACT, {
+                "step_number": len(self.state.react_steps) + 1,
+                "tool_calls_count": len(step.tool_calls)
+            })
+            
             start_time = time.time()
             
             try:
@@ -271,16 +307,22 @@ class CustomInstrumentation:
                     
             except Exception as e:
                 self.performance_metrics["total_errors"] += 1
+                # 结束行动步骤追踪（失败）
+                instrumentation.step_tracker.end_step(session_id, step_id, None, StepStatus.FAILED, str(e))
                 raise
             finally:
                 duration = time.time() - start_time
+                
+                # 结束行动步骤追踪（成功）
+                if 'act_data' in locals():
+                    instrumentation.step_tracker.end_step(session_id, step_id, act_data, StepStatus.SUCCESS)
                 
                 # 记录事件
                 self.data_collector.record_event(
                     session_id=session_id,
                     event_type="act",
                     component="agent",
-                    data=act_data,
+                    data=act_data if 'act_data' in locals() else {},
                     duration=duration,
                     success=True
                 )
@@ -295,6 +337,18 @@ class CustomInstrumentation:
         @functools.wraps(original_method)
         async def wrapper(self, step):
             session_id = getattr(self.state, 'conversation_id', 'unknown')
+            
+            # 获取 instrumentation 实例
+            instrumentation = getattr(self, '_instrumentation', None)
+            if not instrumentation:
+                return await original_method(step)
+            
+            # 开始观察步骤追踪
+            step_id = instrumentation.step_tracker.start_step(session_id, StepType.OBSERVE, {
+                "step_number": len(self.state.react_steps) + 1,
+                "observations_count": len(step.observations)
+            })
+            
             start_time = time.time()
             
             try:
@@ -316,16 +370,22 @@ class CustomInstrumentation:
                         
             except Exception as e:
                 self.performance_metrics["total_errors"] += 1
+                # 结束观察步骤追踪（失败）
+                instrumentation.step_tracker.end_step(session_id, step_id, None, StepStatus.FAILED, str(e))
                 raise
             finally:
                 duration = time.time() - start_time
+                
+                # 结束观察步骤追踪（成功）
+                if 'observe_data' in locals():
+                    instrumentation.step_tracker.end_step(session_id, step_id, observe_data, StepStatus.SUCCESS)
                 
                 # 记录事件
                 self.data_collector.record_event(
                     session_id=session_id,
                     event_type="observe",
                     component="agent",
-                    data=observe_data,
+                    data=observe_data if 'observe_data' in locals() else {},
                     duration=duration,
                     success=True
                 )

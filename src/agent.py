@@ -132,6 +132,9 @@ class Agent:
         # 设置日志
         self._setup_logging()
         
+        # 初始化监控系统
+        self._setup_monitoring()
+        
         logger.info("Agent initialized successfully")
     
     def _register_tools(self):
@@ -163,6 +166,24 @@ class Agent:
                 logging.FileHandler(log_file) if log_file else logging.NullHandler()
             ]
         )
+    
+    def _setup_monitoring(self):
+        """设置监控系统."""
+        try:
+            from src.monitoring.monitoring_manager import instrument_agent_with_monitoring
+            
+            # 根据配置决定是否启用监控
+            if self.config.monitoring.enable_monitoring:
+                success = instrument_agent_with_monitoring(self)
+                if success:
+                    logger.info("监控系统已启用")
+                else:
+                    logger.warning("监控系统启用失败，继续正常运行")
+            else:
+                logger.info("监控功能已禁用")
+                
+        except Exception as e:
+            logger.warning(f"监控系统设置失败: {e}，继续正常运行")
     
     async def _save_conversation_memory(self):
         """保存对话记忆到记忆管理器."""

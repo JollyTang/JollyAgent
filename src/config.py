@@ -155,7 +155,7 @@ class LoggingConfig(BaseModel):
 
     level: str = Field(
         default="INFO",
-        description="Logging level",
+        description="Log level",
     )
     format: str = Field(
         default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -172,6 +172,80 @@ class LoggingConfig(BaseModel):
     backup_count: int = Field(
         default=5,
         description="Number of backup log files",
+    )
+
+
+class MonitoringConfig(BaseModel):
+    """Monitoring configuration."""
+    
+    # 是否启用监控
+    enable_monitoring: bool = Field(
+        default=False,
+        description="Enable monitoring and instrumentation",
+    )
+    
+    # OpenTelemetry 配置
+    enable_opentelemetry: bool = Field(
+        default=True,
+        description="Enable OpenTelemetry integration",
+    )
+    
+    # 监控组件配置
+    enable_agent_tracing: bool = Field(
+        default=True,
+        description="Enable Agent method tracing",
+    )
+    enable_tool_tracing: bool = Field(
+        default=True,
+        description="Enable tool execution tracing",
+    )
+    enable_memory_tracing: bool = Field(
+        default=True,
+        description="Enable memory operation tracing",
+    )
+    enable_llm_tracing: bool = Field(
+        default=True,
+        description="Enable LLM call tracing",
+    )
+    
+    # 性能指标配置
+    enable_performance_metrics: bool = Field(
+        default=True,
+        description="Enable performance metrics collection",
+    )
+    enable_error_tracking: bool = Field(
+        default=True,
+        description="Enable error tracking",
+    )
+    
+    # 执行步骤追踪配置
+    enable_step_tracking: bool = Field(
+        default=True,
+        description="Enable Think-Act-Observe-Response step tracking",
+    )
+    enable_metadata_collection: bool = Field(
+        default=True,
+        description="Enable metadata collection (timestamps, status, errors)",
+    )
+    
+    # 数据存储配置
+    enable_local_backup: bool = Field(
+        default=True,
+        description="Enable local file storage as backup",
+    )
+    backup_directory: str = Field(
+        default="./monitoring_data",
+        description="Directory for monitoring data backup",
+    )
+    
+    # 服务配置
+    service_name: str = Field(
+        default="jollyagent",
+        description="Service name for monitoring",
+    )
+    service_version: str = Field(
+        default="1.0.0",
+        description="Service version for monitoring",
     )
 
 
@@ -194,6 +268,7 @@ class Config(BaseModel):
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     tools: ToolConfig = Field(default_factory=ToolConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
 
     # 性能配置
     max_concurrent_requests: int = Field(
