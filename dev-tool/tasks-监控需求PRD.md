@@ -110,7 +110,7 @@
 
 - [ ] 2.0 数据流转管道构建（Kafka + Flink）
 
-  - [ ] 2.1 设计 Kafka Topic 结构（executions, metrics, events）
+  - [x] 2.1 设计 Kafka Topic 结构（executions, metrics, events）
   - [ ] 2.2 实现 Kafka 生产者，支持数据发送到 Kafka
   - [ ] 2.3 配置 Kafka 集群（分区、副本、压缩等）
   - [ ] 2.4 设计 Flink 流处理作业架构
